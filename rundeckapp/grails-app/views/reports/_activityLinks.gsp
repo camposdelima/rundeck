@@ -236,7 +236,7 @@
                 "></i>
             </td>
             <td class="eventtitle autoclickable" data-bind="css: { job: isJob(), adhoc: isAdhoc() }">
-                <a href="#" data-bind="text: '#'+executionId(), attr: { href: executionHref() }" class="_defaultAction"></a>
+                ${includeJobRef}<a href="#" data-bind="text: '#'+executionId(), attr: { href: executionHref() }" class="_defaultAction"></a>
                 <g:if test="${includeJobRef}">
                     <span data-bind="text: textJobRef('${scheduledExecution.extid}')"></span>
                 </g:if>

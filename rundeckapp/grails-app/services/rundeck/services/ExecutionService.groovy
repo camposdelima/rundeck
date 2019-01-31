@@ -62,7 +62,7 @@ import org.rundeck.util.Sizes
 import org.springframework.context.ApplicationContext
 import org.springframework.context.ApplicationContextAware
 import org.springframework.context.MessageSource
-import org.springframework.transaction.TransactionDefinition
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.validation.ObjectError
 import org.springframework.web.context.request.RequestContextHolder
 import org.springframework.web.servlet.support.RequestContextUtils as RCU
@@ -448,7 +448,7 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
 //                }else if (query.dostartafterFilter && query.startafterFilter ){
 //                    ge('dateStarted',query.startafterFilter)
 //                }
-                
+
 //                if(query.doendafterFilter && query.doendbeforeFilter && query.endafterFilter && query.endbeforeFilter){
 //                    between('dateCompleted',query.endafterFilter,query.endbeforeFilter)
 //                }
@@ -1437,7 +1437,7 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
         if (null != extraParams) {
             privatecontext.put("option", extraParams)
         }
-        
+
         def OrchestratorConfig orchestrator
         if(execMap.orchestrator){
             orchestrator = new OrchestratorConfig(execMap.orchestrator.type, execMap.orchestrator.configuration);
@@ -1844,12 +1844,12 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
 
             execution.userRoles = params.userRoles
 
-            
+
             //parse options
             if(!execution.loglevel){
                 execution.loglevel=defaultLogLevel
             }
-                
+
         } else {
             throw new IllegalArgumentException("insufficient params to create a new Execution instance: " + params)
         }
@@ -2790,47 +2790,104 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
      * @param execution
      * @return
      */
-    def updateScheduledExecStatistics(Long schedId, eId, long time, boolean jobRef = false){
+    def updateScheduledExecStatistics(Long schedId, eId, long time) {
         def success = false
         try {
-            ScheduledExecution.withTransaction {
+            ScheduledExecutionStats.withTransaction {
                 def scheduledExecution = ScheduledExecution.get(schedId)
+                def seStats = scheduledExecution.getStats()
+
 
                 if (scheduledExecution.scheduled) {
                     scheduledExecution.nextExecution = scheduledExecutionService.nextExecutionTime(scheduledExecution)
-                }
-                //TODO: record job stats in separate domain class
-                if (null == scheduledExecution.execCount || 0 == scheduledExecution.execCount || null == scheduledExecution.totalTime || 0 == scheduledExecution.totalTime) {
-                    scheduledExecution.execCount = 1
-                    scheduledExecution.totalTime = time
-                } else if (scheduledExecution.execCount > 0 && scheduledExecution.execCount < 10) {
-                    scheduledExecution.execCount++
-                    scheduledExecution.totalTime += time
-                } else if (scheduledExecution.execCount >= 10) {
-                    def popTime = scheduledExecution.totalTime.intdiv(scheduledExecution.execCount)
-                    scheduledExecution.totalTime -= popTime
-                    scheduledExecution.totalTime += time
-                }
-                if(jobRef){
-                    if(!scheduledExecution.refExecCount){
-                        scheduledExecution.refExecCount=1
-                    }else{
-                        scheduledExecution.refExecCount++
+                    if (scheduledExecution.save(flush: true)) {
+                        log.info("updated scheduled Execution nextExecution")
+                    } else {
+                        scheduledExecution.errors.allErrors.each { log.warn(it.defaultMessage) }
+                        log.warn("failed saving scheduled Execution nextExecution")
                     }
+                }
 
+                if (null == seStats.execCount || 0 == seStats.execCount || null == seStats.totalTime || 0 == seStats.totalTime) {
+                    seStats.execCount = 1
+                    seStats.totalTime = time
+                } else if (seStats.execCount > 0 && seStats.execCount < 10) {
+                    seStats.execCount++
+                    seStats.totalTime += time
+                } else if (seStats.execCount >= 10) {
+                    def popTime = seStats.totalTime.intdiv(seStats.execCount)
+                    seStats.totalTime -= popTime
+                    seStats.totalTime += time
                 }
-                if (scheduledExecution.save(flush:true)) {
-                    log.info("updated scheduled Execution")
-                } else {
-                    scheduledExecution.errors.allErrors.each {log.warn(it.defaultMessage)}
-                    log.warn("failed saving execution to history")
+
+                if (seStats.validate()) {
+                    if (seStats.save(flush: true)) {
+                        log.info("updated scheduled Execution")
+                    } else {
+                        seStats.errors.allErrors.each { log.warn(it.defaultMessage) }
+                        log.warn("failed saving execution to history")
+                    }
+                    success = true
                 }
-                success = true
+
+
             }
         } catch (org.springframework.dao.ConcurrencyFailureException e) {
             log.warn("Caught ConcurrencyFailureException, will retry updateScheduledExecStatistics for ${eId}")
         } catch (StaleObjectStateException e) {
             log.warn("Caught StaleObjectState, will retry updateScheduledExecStatistics for ${eId}")
+        } catch (DuplicateKeyException ve) {
+            log.warn("Caught DuplicateKeyException for migrated stats, will retry updateScheduledExecStatistics for ${eId}")
+        }
+        return success
+    }
+
+    /**
+     * Update jobref stats
+     * @param schedId
+     * @param time
+     * @return
+     */
+    def updateJobRefScheduledExecStatistics(Long schedId, long time) {
+        def success = false
+        try {
+            def seStats = ScheduledExecutionStats.findByScheduledExecutionId(schedId)
+
+            if (null == seStats.execCount || 0 == seStats.execCount || null == seStats.totalTime || 0 == seStats.totalTime) {
+                seStats.execCount = 1
+                seStats.totalTime = time
+            } else if (seStats.execCount > 0 && seStats.execCount < 10) {
+                seStats.execCount++
+                seStats.totalTime += time
+            } else if (seStats.execCount >= 10) {
+                def popTime = seStats.totalTime.intdiv(seStats.execCount)
+                seStats.totalTime -= popTime
+                seStats.totalTime += time
+            }
+
+            if (!seStats.refExecCount) {
+                seStats.refExecCount = 1
+            } else {
+                seStats.refExecCount++
+            }
+
+
+            if (seStats.validate()) {
+                if (seStats.save(flush: true)) {
+                    log.info("updated scheduled Execution")
+                } else {
+                    seStats.errors.allErrors.each { log.warn(it.defaultMessage) }
+                    log.warn("failed saving execution to history")
+                }
+                success = true
+            }
+        } catch (org.springframework.dao.ConcurrencyFailureException e) {
+            log.warn("Caught ConcurrencyFailureException, will retry updateScheduledExecStatistics for referenced Job")
+        } catch (StaleObjectStateException e) {
+            log.warn("Caught StaleObjectState, will retry updateScheduledExecStatistics for referenced Job")
+        } catch (DuplicateKeyException ve) {
+            // Do something ...
+            log.warn("Caught DuplicateKeyException for migrated stats, will retry updateScheduledExecStatistics for referenced Job")
         }
         return success
     }
@@ -3494,10 +3551,7 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
         if(wresult.result) {
             def savedJobState = false
             if(!disableRefStats) {
-                savedJobState = updateScheduledExecStatistics(id, 'jobref', duration, true)
-                if (!savedJobState) {
-                    log.info("ExecutionJob: Failed to update job statistics for jobref")
-                }
+                updateJobRefScheduledExecStatistics(id, duration)
             }
             ReferencedExecution.withTransaction { status ->
                 refExec.status=wresult.result.success?EXECUTION_SUCCEEDED:EXECUTION_FAILED

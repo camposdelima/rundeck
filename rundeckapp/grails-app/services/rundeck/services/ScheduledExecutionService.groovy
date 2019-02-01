@@ -929,7 +929,6 @@ class ScheduledExecutionService implements ApplicationContextAware, Initializing
             def stats= ScheduledExecutionStats.findAllByScheduledExecutionId(scheduledExecution.id)
             if(stats){
                 stats.each { st ->
-                    println(st)
                     st.delete()
                 }
             }
@@ -3196,8 +3195,6 @@ class ScheduledExecutionService implements ApplicationContextAware, Initializing
             scheduledExecution.uuid = UUID.randomUUID().toString()
         }
         if (!failed && scheduledExecution.save(flush:true)) {
-            //create stats
-            println('New Stats!')
             def stats = ScheduledExecutionStats.findByScheduledExecutionId(scheduledExecution.id)
             if (!stats) {
                 stats = new ScheduledExecutionStats(scheduledExecutionId: scheduledExecution.id)

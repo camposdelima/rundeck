@@ -2822,7 +2822,7 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
 
                 if (seStats.validate()) {
                     if (seStats.save(flush: true)) {
-                        log.info("updated scheduled Execution")
+                        log.info("updated scheduled Execution Stats")
                     } else {
                         seStats.errors.allErrors.each { log.warn(it.defaultMessage) }
                         log.warn("failed saving execution to history")
@@ -2874,20 +2874,20 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
 
             if (seStats.validate()) {
                 if (seStats.save(flush: true)) {
-                    log.info("updated scheduled Execution")
+                    log.info("updated referenced Job Stats")
                 } else {
                     seStats.errors.allErrors.each { log.warn(it.defaultMessage) }
-                    log.warn("failed saving execution to history")
+                    log.warn("failed saving referenced Job Stats")
                 }
                 success = true
             }
         } catch (org.springframework.dao.ConcurrencyFailureException e) {
-            log.warn("Caught ConcurrencyFailureException, will retry updateScheduledExecStatistics for referenced Job")
+            log.warn("Caught ConcurrencyFailureException, dismissed statistic for referenced Job")
         } catch (StaleObjectStateException e) {
-            log.warn("Caught StaleObjectState, will retry updateScheduledExecStatistics for referenced Job")
+            log.warn("Caught StaleObjectState, dismissed statistic for for referenced Job")
         } catch (DuplicateKeyException ve) {
             // Do something ...
-            log.warn("Caught DuplicateKeyException for migrated stats, will retry updateScheduledExecStatistics for referenced Job")
+            log.warn("Caught DuplicateKeyException for migrated stats, dismissed statistic for referenced Job")
         }
         return success
     }
